@@ -185,17 +185,18 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
                 const checkRules = (value: unknown) => {
                     let allRules = rules;
                     if (minValue !== undefined || maxValue !== undefined) allRules = [ ...allRules ];
-                    if (minValue !== undefined) allRules.unshift(v => v as any >= (minValue as any));
-                    if (maxValue !== undefined) allRules.unshift(v => v as any <= (maxValue as any));
+                    if (minValue !== undefined) allRules.unshift((v, msg) => msg && msg(`must be at least ${minValue}`) || v as any >= (minValue as any));
+                    if (maxValue !== undefined) allRules.unshift((v, msg) => msg && msg(`must be at most ${maxValue}`) || v as any <= (maxValue as any));
+                    let outMessage: string | undefined;
                     for (const rule of allRules) {
-                        const result = rule(value);
-                        if (result === false || typeof result === 'string') return fail(path, value, typeof result === 'string' ? result : undefined);
+                        outMessage = undefined;
+                        if (!rule(value, msg => { outMessage = msg; return false })) return fail(path, value, outMessage);
                     }
                 }
                 if (optional && input === undefined) return;
                 if (nullable && input === null) return;
                 if (schemaType === undefined || schemaType === 'object') {
-                    if (!isStringRecord(input)) throw new Error(`Bad ${path.join('.')}: expected object`);
+                    if (!isStringRecord(input)) return fail(path, input, 'expected object');
                     for (const [ propName, propDef ] of Object.entries(objectSchema ?? schema)) {
                         const propValue = input[propName];
                         path.push(propName);

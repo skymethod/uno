@@ -21,8 +21,8 @@ Deno.test('parse', () => {
     assertEquals(z.object<{ arr1: string[] }>({ arr1: z.array(z.string()).distinct() }).parse({ arr1: [ 'a', 'b', 'c', 'a' ] }), { arr1: [ 'a', 'b', 'c' ] });
     assertThrows(() => z.object<{ int1: number }>({ int1: z.number() }).parse({ int1: '1' }));
     assertThrows(() => z.object<{ int1: number }>({ int1: z.integer() }).parse({ int1: 1.2 }));
-    assertThrows(() => z.object<{ int1: number }>({ int1: z.integer().min(1) }).parse({ int1: 0 }));
-    assertThrows(() => z.object<{ int1: number }>({ int1: z.integer().max(1) }).parse({ int1: 2 }));
+    assertThrows(() => z.object<{ int1: number }>({ int1: z.integer().min(1) }).parse({ int1: 0 }), Error, 'at least 1');
+    assertThrows(() => z.object<{ int1: number }>({ int1: z.integer().max(1) }).parse({ int1: 2 }), Error, 'at most 1');
     assertEquals(z.object<{ int1: number }>({ int1: z.number().convertString() }).parse({ int1: '1' }), { int1: 1 });
     assertEquals(z.object<{ int1: number }>({ int1: z.integer().min(1).max(1) }).parse({ int1: 1 }), { int1: 1 });
     assertEquals(z.object<{ int1?: number }>({ int1: z.integer().optional() }).parse({ int1: undefined }), { });
