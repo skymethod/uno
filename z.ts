@@ -2,15 +2,19 @@
 
 export const isNotEmpty: Rule<string> = (str, msg) => msg && msg('cannot be empty') || str !== '';
 export const isValidTimestamp: Rule<string> = (str, msg) => msg && msg('must be a valid timestamp') || tryParseDate(str)?.toISOString() === str;
+export const isValidUrl: Rule<string> = (str, msg) => msg && msg('must be a valid URL') || tryParseUrl(str) !== undefined;
 export const isArrayDistinct: Rule<unknown[]> = (arr, msg) => msg && msg('must have distinct elements') || arr.every((v, index) => arr.indexOf(v) === index);
 
 export const isStringRecord = (obj: unknown): obj is Record<string, unknown> => typeof obj === 'object' && obj !== null && !Array.isArray(obj) && obj.constructor === Object && Object.keys(obj).every(v => typeof v === 'string');
 export const tryParseDate = (str: string): Date | undefined => { try { return new Date(str); } catch { /* noop */} };
+export const tryParseUrl = (str: string): URL | undefined => { try { return URL.parse(str) || undefined; } catch { /* noop */} };
 
 //
 
+export type ParseOpts = string /* name */ | { name?: string, strict?: boolean };
+
 export type Schema<TValue> = {
-    parse(input: unknown, name?: string): TValue,
+    parse(input: unknown, opts?: ParseOpts): TValue,
 }
 
 export type Builder<TValue> = TValue & Schema<TValue> & {
@@ -25,7 +29,9 @@ export type NumberBuilder<TValue> = TValue & Schema<TValue> & {
     nullable: () => NumberBuilder<TValue | null>,
     convertString: () => NumberBuilder<TValue>,
     min: (value: TValue) => NumberBuilder<TValue>,
+    gt: (value: TValue) => NumberBuilder<TValue>,
     max: (value: TValue) => NumberBuilder<TValue>,
+    lt: (value: TValue) => NumberBuilder<TValue>,
 }
 
 export type ArrayBuilder<TValueArray> = TValueArray & Schema<TValueArray> & {
@@ -47,6 +53,7 @@ export type Z = {
     array: <T>(item: T, ...rules: Rule<T[]>[]) => ArrayBuilder<T[]>,
     string: (...rules: (RegExp | Rule<string>)[]) => Builder<string>,
     timestamp: (...rules: (RegExp | Rule<string>)[]) => Builder<string>,
+    url: (...rules: (RegExp | Rule<URL>)[]) => Builder<string>,
     record: <K extends string | number | symbol, V>(key: K, value: V, ...rules: Rule<Record<K, V>>[]) => any, // TODO
     object: <T>(type: BasicObject<T>, ...rules: Rule<T>[]) => Builder<T>,
     literal: <T>(value: T, ...rules: Rule<T>[]) => Builder<T>,
@@ -69,6 +76,11 @@ export const z: Z = {
     },
     timestamp: (...rules) => {
         return z.string(...[ isValidTimestamp, ...rules ]);
+    },
+    url: (...rulesOrRegexes) => {
+        const rules: Rule<string>[] = rulesOrRegexes.map(v => typeof v === 'function' ? (s=> v(URL.parse(s)!)) : p => v.test(p));
+        rules.unshift(isValidUrl);
+        return newBuilder({ schemaType: 'string', rules });
     },
     array: (arrayItemSchema, ...rules) => {
         return newBuilder({ schemaType: 'array', rules, arrayItemSchema });
@@ -94,7 +106,7 @@ const stateSymbol = Symbol();
 type SchemaType = 'boolean' | 'number' | 'string' | 'array' | 'record' | 'object' | 'literal' | 'union';
 type BuilderState<TValue> = {
     schemaType: SchemaType | undefined, rules: Rule<TValue>[], arrayItemSchema?: any, recordKeySchema?: any, recordValueSchema?: any,
-    distinct?: boolean, defaultValue?: unknown, convertString?: boolean, minValue?: unknown, maxValue?: unknown, optional?: boolean,
+    distinct?: boolean, defaultValue?: unknown, convertString?: boolean, minValue?: unknown, gtValue?: unknown, maxValue?: unknown, ltValue?: unknown, optional?: boolean,
     objectSchema?: any, literalValue?: any, lhsSchema?: any, rhsSchema?: any, nullable?: boolean,
 };
 
@@ -163,9 +175,19 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
             state.minValue = value;
             return rt;
         },
+        gt: (value: unknown) => {
+            if (schemaType !== 'number') throw new Error();
+            state.gtValue = value;
+            return rt;
+        },
         max: (value: unknown) => {
             if (schemaType !== 'number') throw new Error();
             state.maxValue = value;
+            return rt;
+        },
+        lt: (value: unknown) => {
+            if (schemaType !== 'number') throw new Error();
+            state.ltValue = value;
             return rt;
         },
         distinct: () => {
@@ -173,20 +195,24 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
             state.distinct = true;
             return rt;
         },
-        parse: (input: unknown, name?: string) => {
-            const path: (string | number)[] = [ name ?? 'input' ];
+        parse: (input: unknown, opts: ParseOpts = {}) => {
+            const name = typeof opts === 'string' ? opts : isStringRecord(opts) && typeof opts.name === 'string' ? opts.name : 'input';
+            const strict = isStringRecord(opts) ? !!opts.strict : undefined;
+            const path: (string | number)[] = [ name ];
 
             const applySchema = (input: unknown, schema: any, fail: (path: (string | number)[], value: unknown, message?: string) => void) => {
                 const {
                     schemaType, rules, arrayItemSchema, convertString, distinct, recordKeySchema, recordValueSchema,
-                    defaultValue, minValue, maxValue, optional, objectSchema, literalValue, lhsSchema, rhsSchema,
+                    defaultValue, minValue, gtValue, maxValue, ltValue, optional, objectSchema, literalValue, lhsSchema, rhsSchema,
                     nullable
                 } = (schema[stateSymbol] ?? {}) as BuilderState<unknown>;
                 const checkRules = (value: unknown) => {
                     let allRules = rules;
-                    if (minValue !== undefined || maxValue !== undefined) allRules = [ ...allRules ];
+                    if (minValue !== undefined || gtValue !== undefined || maxValue !== undefined || ltValue !== undefined) allRules = [ ...allRules ];
                     if (minValue !== undefined) allRules.unshift((v, msg) => msg && msg(`must be at least ${minValue}`) || v as any >= (minValue as any));
+                    if (gtValue !== undefined) allRules.unshift((v, msg) => msg && msg(`must be greater than ${gtValue}`) || v as any > (gtValue as any));
                     if (maxValue !== undefined) allRules.unshift((v, msg) => msg && msg(`must be at most ${maxValue}`) || v as any <= (maxValue as any));
+                    if (ltValue !== undefined) allRules.unshift((v, msg) => msg && msg(`must be less than ${ltValue}`) || v as any < (ltValue as any));
                     let outMessage: string | undefined;
                     for (const rule of allRules) {
                         outMessage = undefined;
@@ -197,6 +223,7 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
                 if (nullable && input === null) return;
                 if (schemaType === undefined || schemaType === 'object') {
                     if (!isStringRecord(input)) return fail(path, input, 'expected object');
+                    const allowedKeys = strict ? new Set<string>() : undefined;
                     for (const [ propName, propDef ] of Object.entries(objectSchema ?? schema)) {
                         const propValue = input[propName];
                         path.push(propName);
@@ -206,6 +233,13 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
                         }
                         if (input[propName] === undefined) delete input[propName];
                         path.pop();
+                        allowedKeys?.add(propName);
+                    }
+                    if (allowedKeys) {
+                        const unexpectedKeys = Object.keys(input).filter(v => !allowedKeys.has(v));
+                        if (unexpectedKeys.length > 0) {
+                            return fail(path, input, `Unexpected key${unexpectedKeys.length > 1 ? 's' : ''}: ${unexpectedKeys.join(', ')}`);
+                        }
                     }
                     checkRules(input);
                 } else if (schemaType === 'number') {
