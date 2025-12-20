@@ -50,6 +50,7 @@ export type Z = {
     boolean: (...rules: Rule<boolean>[]) => NumberBuilder<boolean>,
     number: (...rules: Rule<number>[]) => NumberBuilder<number>,
     integer: (...rules: Rule<number>[]) => NumberBuilder<number>,
+    unknown: (...rules: Rule<unknown>[]) => Builder<unknown>,
     array: <T>(item: T, ...rules: Rule<T[]>[]) => ArrayBuilder<T[]>,
     string: (...rules: (RegExp | Rule<string>)[]) => Builder<string>,
     timestamp: (...rules: (RegExp | Rule<string>)[]) => Builder<string>,
@@ -69,6 +70,9 @@ export const z: Z = {
     },
     integer: (...rules) => {
         return z.number(...[ Number.isSafeInteger, ...rules ]);
+    },
+    unknown: (...rules) => {
+        return newBuilder({ schemaType: 'unknown', rules });
     },
     string: (...rulesOrRegexes) => {
         const rules: Rule<string>[] = rulesOrRegexes.map(v => typeof v === 'function' ? v : p => v.test(p));
@@ -103,7 +107,7 @@ export const z: Z = {
 
 const stateSymbol = Symbol();
 
-type SchemaType = 'boolean' | 'number' | 'string' | 'array' | 'record' | 'object' | 'literal' | 'union';
+type SchemaType = 'boolean' | 'number' | 'string' | 'unknown' | 'array' | 'record' | 'object' | 'literal' | 'union';
 type BuilderState<TValue> = {
     schemaType: SchemaType | undefined, rules: Rule<TValue>[], arrayItemSchema?: any, recordKeySchema?: any, recordValueSchema?: any,
     distinct?: boolean, defaultValue?: unknown, convertString?: boolean, minValue?: unknown, gtValue?: unknown, maxValue?: unknown, ltValue?: unknown, optional?: boolean,
@@ -135,7 +139,7 @@ function computeSchemaDescription(schema: any): string {
         optional, nullable, objectSchema, literalValue, lhsSchema, rhsSchema
     } = (schema[stateSymbol] ?? {}) as BuilderState<unknown>;
     const base = schemaType === undefined && isStringRecord(schema) ? computeSchemaDescriptionFromObject(schema)
-        : (schemaType === 'boolean' || schemaType === 'number' || schemaType === 'string') ? schemaType
+        : (schemaType === 'boolean' || schemaType === 'number' || schemaType === 'string' || schemaType === 'unknown') ? schemaType
         : schemaType === 'union' ? `${computeSchemaDescription(lhsSchema)} | ${computeSchemaDescription(rhsSchema)}`
         : schemaType === 'array' ? `Array<${computeSchemaDescription(arrayItemSchema)}>`
         : schemaType === 'literal' ? computeLiteralDescription(literalValue)
@@ -295,11 +299,13 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
                     }
                     checkRules(input);
                 } else if (schemaType === 'literal') {
-                    if (!literalValue) throw new Error();
+                    if (literalValue === undefined) throw new Error();
                     if (input !== literalValue) return fail(path, input, 'unexpected literal value');
                     checkRules(input);
                 } else if (schemaType === 'boolean') {
                     if (typeof input !== 'boolean') return fail(path, input, 'expected boolean');
+                    checkRules(input);
+                } else if (schemaType === 'unknown') {
                     checkRules(input);
                 } else if (schemaType === 'union') {
                     if (!lhsSchema || !rhsSchema) throw new Error();
