@@ -39,6 +39,7 @@ export type ArrayBuilder<TValueArray> = TValueArray & Schema<TValueArray> & {
     optional: () => ArrayBuilder<TValueArray | undefined>,
     nullable: () => ArrayBuilder<TValueArray | null>,
     distinct: () => ArrayBuilder<TValueArray>,
+    max: (numItems: number) => ArrayBuilder<TValueArray>,
 }
 
 export type Rule<T> = (input: T, msg?: (message: string) => false) => boolean;
@@ -111,7 +112,7 @@ type SchemaType = 'boolean' | 'number' | 'string' | 'unknown' | 'array' | 'recor
 type BuilderState<TValue> = {
     schemaType: SchemaType | undefined, rules: Rule<TValue>[], arrayItemSchema?: any, recordKeySchema?: any, recordValueSchema?: any,
     distinct?: boolean, defaultValue?: unknown, convertString?: boolean, minValue?: unknown, gtValue?: unknown, maxValue?: unknown, ltValue?: unknown, optional?: boolean,
-    objectSchema?: any, literalValue?: any, lhsSchema?: any, rhsSchema?: any, nullable?: boolean,
+    objectSchema?: any, literalValue?: any, lhsSchema?: any, rhsSchema?: any, nullable?: boolean, maxItems?: number,
 };
 
 function computeLiteralDescription(value: unknown): string {
@@ -185,8 +186,13 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
             return rt;
         },
         max: (value: unknown) => {
-            if (schemaType !== 'number') throw new Error();
-            state.maxValue = value;
+            if (schemaType === 'array') {
+                state.maxItems = z.integer().min(0).parse(value, { name: 'numItems' });
+            } else if (schemaType === 'number') {
+                state.maxValue = value;
+            } else {
+                throw new Error();
+            }
             return rt;
         },
         lt: (value: unknown) => {
@@ -208,7 +214,7 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
                 const {
                     schemaType, rules, arrayItemSchema, convertString, distinct, recordKeySchema, recordValueSchema,
                     defaultValue, minValue, gtValue, maxValue, ltValue, optional, objectSchema, literalValue, lhsSchema, rhsSchema,
-                    nullable
+                    nullable, maxItems,
                 } = (schema[stateSymbol] ?? {}) as BuilderState<unknown>;
                 const checkRules = (value: unknown) => {
                     let allRules = rules;
@@ -284,6 +290,7 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
                         path.pop();
                     }
                     checkRules(input);
+                    if (maxItems !== undefined && input.length > maxItems) return fail(path, input, `expected at most ${maxItems} item${maxItems === 1 ? '' : 's'}`);
                     if (distinct && !isArrayDistinct(input)) return Array.from(new Set(input));
                 } else if (schemaType === 'record') {
                     if (!recordKeySchema || !recordValueSchema) throw new Error();
