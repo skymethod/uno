@@ -352,7 +352,7 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
                     throw new Error();
                 }
             };
-            applySchema(input, rt, (path, value, message) => { throw new Error(`Bad ${path.join('.')}: ${value}${message ? `, ${message}` : ''}`); });
+            applySchema(input, rt, (path, value, message) => { throw new Error(`Bad ${path.join('.')}: ${typeof value === 'object' ? JSON.stringify(value) : value}${message ? `, ${message}` : ''}`); });
             return input;
         },
         toString: () => {
