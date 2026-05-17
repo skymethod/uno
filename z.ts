@@ -2,6 +2,7 @@
 
 export const isNotEmpty: Rule<string> = (str, msg) => msg && msg('cannot be empty') || str !== '';
 export const isValidTimestamp: Rule<string> = (str, msg) => msg && msg('must be a valid timestamp') || tryParseDate(str)?.toISOString() === str;
+export const isValidUuid: Rule<string> = (str, msg) => msg && msg('must be a valid uuid') || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(str);
 export const isValidUrl: Rule<string> = (str, msg) => msg && msg('must be a valid URL') || tryParseUrl(str) !== undefined;
 export const isArrayDistinct: Rule<unknown[]> = (arr, msg) => msg && msg('must have distinct elements') || arr.every((v, index) => arr.indexOf(v) === index);
 
@@ -58,6 +59,7 @@ export type Z = {
     array: <T>(item: T, ...rules: Rule<T[]>[]) => ArrayBuilder<T[]>,
     string: (...rules: (RegExp | Rule<string>)[]) => Builder<string>,
     timestamp: (...rules: (RegExp | Rule<string>)[]) => Builder<string>,
+    uuid: (...rules: (RegExp | Rule<string>)[]) => Builder<string>,
     url: (...rules: (RegExp | Rule<URL>)[]) => Builder<string>,
     record: <K extends string | number | symbol, V>(key: K, value: V, ...rules: Rule<Record<K, V>>[]) => any, // TODO
     object: <T>(type: BasicObject<T>, ...rules: Rule<T>[]) => Builder<T>,
@@ -84,6 +86,9 @@ export const z: Z = {
     },
     timestamp: (...rules) => {
         return z.string(...[ isValidTimestamp, ...rules ]);
+    },
+    uuid: (...rules) => {
+        return z.string(...[ isValidUuid, ...rules ]);
     },
     url: (...rulesOrRegexes) => {
         const rules: Rule<string>[] = rulesOrRegexes.map(v => typeof v === 'function' ? (s=> v(URL.parse(s)!)) : p => v.test(p));
@@ -341,10 +346,10 @@ function newBuilder<TValue>(state: BuilderState<TValue>): any {
                 } else if (schemaType === 'union') {
                     if (!lhsSchema || !rhsSchema) throw new Error();
                     let failed = false;
-                    applySchema(input, lhsSchema, () => failed = true);
+                    applySchema(input, lhsSchema, () => { failed = true });
                     if (failed) {
                         failed = false;
-                        applySchema(input, rhsSchema, () => failed = true);
+                        applySchema(input, rhsSchema, () => { failed = true });
                         if (failed) return fail(path, input, `expected ${computeSchemaDescription(lhsSchema)} | ${computeSchemaDescription(rhsSchema)}`);
                     }
                     checkRules(input);
